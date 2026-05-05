@@ -66,7 +66,7 @@ setup(
         "torchvision"
     ],
     dependency_links=[
-        'https://download.pytorch.org/whl/cu124'
+        'https://download.pytorch.org/whl/cu128'
     ],
     cmdclass={"build_ext": BuildExtension},
     zip_safe=False,

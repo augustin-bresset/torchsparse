@@ -37,10 +37,12 @@ extension_type = CUDAExtension if device == "cuda" else CppExtension
 extra_compile_args = {
     "cxx": ["-g", "-O3", "-fopenmp", "-lgomp"],
     "nvcc": [
-        "-O3", "-std=c++17", 
-        "-gencode=arch=compute_90,code=sm_90",
-        "-gencode=arch=compute_120,code=sm_120"
-        ],
+        "-O3", "-std=c++17",
+        "-gencode=arch=compute_86,code=sm_86",   # Ampere consumer (RTX 3090/3080)
+        "-gencode=arch=compute_89,code=sm_89",   # Ada Lovelace (RTX 4090 Ti / RTX 4090)
+        "-gencode=arch=compute_90,code=sm_90",   # Hopper (H100/H200)
+        "-gencode=arch=compute_120,code=sm_120", # Blackwell (B100/B200)
+    ],
 }
 
 setup(
@@ -64,7 +66,7 @@ setup(
         "torchvision"
     ],
     dependency_links=[
-        'https://download.pytorch.org/whl/cu118'
+        'https://download.pytorch.org/whl/cu124'
     ],
     cmdclass={"build_ext": BuildExtension},
     zip_safe=False,

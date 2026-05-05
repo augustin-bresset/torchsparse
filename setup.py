@@ -36,7 +36,11 @@ for fpath in glob.glob(os.path.join("torchsparse", "backend", "**", "*")):
 extension_type = CUDAExtension if device == "cuda" else CppExtension
 extra_compile_args = {
     "cxx": ["-g", "-O3", "-fopenmp", "-lgomp"],
-    "nvcc": ["-O3", "-std=c++17"],
+    "nvcc": [
+        "-O3", "-std=c++17", 
+        "-gencode=arch=compute_90,code=sm_90",
+        "-gencode=arch=compute_120,code=sm_120"
+        ],
 }
 
 setup(
@@ -64,4 +68,5 @@ setup(
     ],
     cmdclass={"build_ext": BuildExtension},
     zip_safe=False,
+    
 )

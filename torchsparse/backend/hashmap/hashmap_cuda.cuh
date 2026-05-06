@@ -52,14 +52,17 @@ __device__ int hash(key_type key, int _capacity){
 
 template <typename key_type>
 __device__ int hash_murmur3(key_type key, int _capacity){
-  // use the murmur3 hash function for int32
-  int64_t k = (int64_t)key;
+  // Murmur3 finalizer using unsigned arithmetic to avoid signed-overflow UB.
+  // Signed overflow in CUDA is technically UB; NVCC may optimize away
+  // a post-hoc negativity check, causing out-of-bounds accesses.
+  uint64_t k = (uint64_t)(int64_t)key;
   k ^= k >> 16;
-  k *= 0x85ebca6b;
+  k *= UINT64_C(0x85ebca6b);
   k ^= k >> 13;
-  k *= 0xc2b2ae35;
+  k *= UINT64_C(0xc2b2ae35);
   k ^= k >> 16;
-  return k % _capacity;
+  // unsigned modulo is always in [0, _capacity) — no negative index possible
+  return (int)(k % (uint64_t)_capacity);
 }
 
 template <typename key_type, typename val_type>
@@ -70,8 +73,9 @@ class GPUHashTable {
   const int _divisor;
   key_type* table_keys;
   val_type* table_vals;
+  int* d_overflow_flag;
   void insert_many_coords(int *coords, const int n);
-  void lookup_many_coords(int *coords, val_type *results, 
+  void lookup_many_coords(int *coords, val_type *results,
     const int* kernel_sizes, const int* tensor_strides,
     const int n, const int kernel_volume);
  public:
@@ -82,16 +86,34 @@ class GPUHashTable {
     cudaMemset(table_keys, 0, sizeof(key_type) * _capacity);
     cudaMalloc((void **)&table_vals, _capacity * sizeof(val_type));
     cudaMemset(table_vals, 0, sizeof(val_type) * _capacity);
+    cudaMalloc((void **)&d_overflow_flag, sizeof(int));
+    cudaMemset(d_overflow_flag, 0, sizeof(int));
   };
   GPUHashTable(torch::Tensor table_keys, torch::Tensor table_vals)
-      : _capacity(table_keys.size(0)), free_pointers(false), table_keys(table_keys.data_ptr<key_type>()),
-      table_vals(table_vals.data_ptr<val_type>()), _divisor(128){};
+      : _capacity(table_keys.size(0)), free_pointers(false),
+        table_keys(table_keys.data_ptr<key_type>()),
+        table_vals(table_vals.data_ptr<val_type>()), _divisor(128){
+    cudaMalloc((void **)&d_overflow_flag, sizeof(int));
+    cudaMemset(d_overflow_flag, 0, sizeof(int));
+  };
   ~GPUHashTable() {
     if(free_pointers){
       cudaFree(table_keys);
       cudaFree(table_vals);
     }
+    cudaFree(d_overflow_flag);
   };
+  void check_overflow() {
+    cudaError_t sync_err = cudaDeviceSynchronize();
+    TORCH_CHECK(sync_err == cudaSuccess,
+      "TorchSparse: CUDA error in hashmap kernel: ", cudaGetErrorString(sync_err),
+      " — possible causes: hash collision chain, illegal memory access in insert/lookup.");
+    int flag = 0;
+    cudaMemcpy(&flag, d_overflow_flag, sizeof(int), cudaMemcpyDeviceToHost);
+    TORCH_CHECK(flag == 0,
+      "TorchSparse: GPU hashmap overflow — table capacity (", _capacity, " slots) exceeded. "
+      "Increase torchsparse.backends.hash_rsv_ratio (current default: 2) or use a larger voxel size.");
+  }
   void insert_many(const key_type *keys, const int n);
   void lookup_many(const key_type *keys, val_type *results, const int n);
   void insert_vals(torch::Tensor keys);
@@ -105,15 +127,17 @@ class GPUHashTable {
       int _capacity;
       key_type* _table_keys;
       val_type* _table_vals;
+      int* _overflow_flag;
     public:
       __host__ __device__ device_view(
-        int capacity, key_type* table_keys, val_type* table_vals
-      ):_capacity(capacity), _table_keys(table_keys), _table_vals(table_vals){}
+        int capacity, key_type* table_keys, val_type* table_vals, int* overflow_flag
+      ):_capacity(capacity), _table_keys(table_keys), _table_vals(table_vals),
+        _overflow_flag(overflow_flag){}
       __device__ val_type lookup(const key_type key);
       __device__ void insert(const key_type key, const val_type val);
   };
   __host__ __device__ device_view get_device_view(){
-    return device_view(_capacity, table_keys, table_vals);
+    return device_view(_capacity, table_keys, table_vals, d_overflow_flag);
   }
 };
 
@@ -122,16 +146,15 @@ using hashtable32 = GPUHashTable<int, int>;
 
 // Insert into hashmap
 template <typename key_type=int64_t, typename val_type=int>
-__global__ void insert_kernel(key_type* table_keys, val_type* table_vals, const key_type* keys, int n, int _capacity)
+__global__ void insert_kernel(key_type* table_keys, val_type* table_vals, const key_type* keys, int n, int _capacity, int* overflow_flag)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n)
     {
-
         key_type key = keys[idx];
         int value = idx + 1;
         int slot = hash(key, _capacity);
-        while (true)
+        for (int iter = 0; iter < _capacity; ++iter)
         {
             key_type prev = atomicCAS(&table_keys[slot], EMPTY_CELL, key);
             if (prev == EMPTY_CELL || prev == key)
@@ -139,15 +162,16 @@ __global__ void insert_kernel(key_type* table_keys, val_type* table_vals, const 
                 table_vals[slot] = value;
                 return;
             }
-
             slot = (slot + 1) % _capacity;
         }
+        // Table is full — signal overflow
+        if (overflow_flag) atomicOr(overflow_flag, 1);
     }
 }
 
 
 template <typename key_type=int64_t, typename val_type=int>
-__global__ void insert_coords_kernel(key_type* table_keys, val_type* table_vals, int* coords, int n, int _capacity)
+__global__ void insert_coords_kernel(key_type* table_keys, val_type* table_vals, int* coords, int n, int _capacity, int* overflow_flag)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n)
@@ -155,7 +179,7 @@ __global__ void insert_coords_kernel(key_type* table_keys, val_type* table_vals,
         key_type key = (key_type)(hash_func_64b(coords + idx * 4));
         int value = idx + 1;
         int slot = hash(key, _capacity);
-        while (true)
+        for (int iter = 0; iter < _capacity; ++iter)
         {
             key_type prev = atomicCAS(&table_keys[slot], EMPTY_CELL, key);
             if (prev == EMPTY_CELL || prev == key)
@@ -165,6 +189,7 @@ __global__ void insert_coords_kernel(key_type* table_keys, val_type* table_vals,
             }
             slot = (slot + 1) % _capacity;
         }
+        if (overflow_flag) atomicOr(overflow_flag, 1);
     }
 }
 
@@ -179,38 +204,41 @@ __global__ void lookup_kernel(key_type* table_keys, val_type* table_vals, const 
         key_type key = keys[idx];
         int slot = hash(key, _capacity);
 
-        while (true)
+        for (int iter = 0; iter < _capacity; ++iter)
         {
             key_type cur_key = table_keys[slot];
             if (key == cur_key)
-            { 
+            {
                 vals[idx] = table_vals[slot];
+                return;
             }
-            if (table_keys[slot] == EMPTY_CELL)
+            if (cur_key == EMPTY_CELL)
             {
                 return;
             }
             slot = (slot + 1) % _capacity;
         }
+        // Table fully scanned without finding key or empty slot (table overflowed at insert time)
     }
 }
 
 
 template <typename key_type=int64_t, typename val_type=int, bool odd>
 __global__ void lookup_coords_kernel(
-  key_type* table_keys, val_type* table_vals, int* coords, val_type* vals, 
-  const int* kernel_sizes, const int* strides, 
+  key_type* table_keys, val_type* table_vals, int* coords, val_type* vals,
+  const int* kernel_sizes, const int* strides,
   int n, int _capacity, int kernel_volume)
 {
     int tidx = blockIdx.x * blockDim.x + threadIdx.x;
     int idx = tidx / kernel_volume;
     int _kernel_idx = tidx % kernel_volume;
     int kernel_idx = _kernel_idx;
+    if (idx >= n) return;
     int* in_coords = coords + 4 * idx;
     int coords_out[4];
     coords_out[3] = in_coords[3];
-    
-    if constexpr (odd) 
+
+    if constexpr (odd)
     {
       #pragma unroll
       for(int i = 0; i <= 2; i++){
@@ -230,48 +258,51 @@ __global__ void lookup_coords_kernel(
         _kernel_idx /= kernel_sizes[i];
       }
     }
-    
-    if (idx < n)
+
     {
         key_type key = (key_type)(hash_func_64b(coords_out));
         int slot = hash(key, _capacity);
 
-        while (true)
+        for (int iter = 0; iter < _capacity; ++iter)
         {
             key_type cur_key = table_keys[slot];
             if (key == cur_key)
-            { 
+            {
                 vals[idx * kernel_volume + kernel_idx] = table_vals[slot];
+                return;
             }
-            if (table_keys[slot] == EMPTY_CELL)
+            if (cur_key == EMPTY_CELL)
             {
                 return;
             }
             slot = (slot + 1) % _capacity;
         }
+        // Table fully scanned without finding key or empty slot
     }
 }
 
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::insert_many(const key_type *keys, const int n){
-  insert_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, keys, n, _capacity);
+  insert_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, keys, n, _capacity, d_overflow_flag);
 }
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::insert_many_coords(int *coords, const int n){
-  insert_coords_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, coords, n, _capacity);
+  insert_coords_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, coords, n, _capacity, d_overflow_flag);
 }
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::insert_vals(at::Tensor keys){
   insert_many(keys.data_ptr<key_type>(), keys.size(0));
+  check_overflow();
 }
 
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::insert_coords(at::Tensor coords){
   insert_many_coords(coords.data_ptr<int>(), coords.size(0));
+  check_overflow();
 }
 
 template <typename key_type, typename val_type>
@@ -281,7 +312,7 @@ void GPUHashTable<key_type, val_type>::lookup_many(const key_type *keys, val_typ
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::lookup_many_coords(
-  int *coords, val_type *results, 
+  int *coords, val_type *results,
   const int* kernel_sizes, const int* strides,
   const int n, const int kernel_volume){
   if (kernel_volume % 2)
@@ -308,7 +339,7 @@ at::Tensor GPUHashTable<key_type, val_type>::lookup_coords(at::Tensor coords, at
   auto options =
       torch::TensorOptions().dtype(at::ScalarType::Int).device(coords.device());
   at::Tensor results = torch::zeros({(coords.size(0) + _divisor - 1) / _divisor * _divisor, kernel_volume}, options);
-  lookup_many_coords(coords.data_ptr<int>(), results.data_ptr<val_type>(), 
+  lookup_many_coords(coords.data_ptr<int>(), results.data_ptr<val_type>(),
   kernel_sizes.data_ptr<int>(), strides.data_ptr<int>(), coords.size(0), kernel_volume);
   return results;
 }
@@ -316,7 +347,7 @@ at::Tensor GPUHashTable<key_type, val_type>::lookup_coords(at::Tensor coords, at
 template <typename key_type, typename val_type>
 __device__ void GPUHashTable<key_type, val_type>::device_view::insert(const key_type key, const val_type val){
   int slot = hash_murmur3(key, _capacity);
-  while (true)
+  for (int iter = 0; iter < _capacity; ++iter)
   {
     key_type prev = atomicCAS(&_table_keys[slot], EMPTY_CELL, key);
     if (prev == EMPTY_CELL || prev == key)
@@ -326,23 +357,27 @@ __device__ void GPUHashTable<key_type, val_type>::device_view::insert(const key_
     }
     slot = (slot + 1) % _capacity;
   }
+  // Table is full — signal overflow
+  if (_overflow_flag) atomicOr(_overflow_flag, 1);
 }
 
 template <typename key_type, typename val_type>
 __device__ val_type GPUHashTable<key_type, val_type>::device_view::lookup(const key_type key){
   int slot = hash_murmur3(key, _capacity);
 
-  while (true)
+  for (int iter = 0; iter < _capacity; ++iter)
   {
     key_type cur_key = _table_keys[slot];
     if (key == cur_key)
-    { 
+    {
       return _table_vals[slot];
     }
-    if (_table_keys[slot] == EMPTY_CELL)
+    if (cur_key == EMPTY_CELL)
     {
         return EMPTY_CELL;
     }
     slot = (slot + 1) % _capacity;
   }
+  // Table fully scanned — overflow was signalled at insert time
+  return EMPTY_CELL;
 }

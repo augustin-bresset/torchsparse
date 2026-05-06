@@ -280,9 +280,11 @@ std::vector<at::Tensor> build_kernel_map_subm_hashmap_int32(
   at::Tensor _out_in_map = torch::full({n_points_pad, kernel_volume}, -1, options);
   int *out_in_map = _out_in_map.data_ptr<int>();
   // stage1: insert to hashmap
-  if (to_insert)
+  if (to_insert) {
     subm_hashmap_kmap_stage1<hashtable32::device_view, int32_t><<<(int)ceil((double)n_points / 256), 256>>>(
         table.get_device_view(), n_points, kernel_volume, in_coords, coords_min, coords_max, out_coords);
+    table.check_overflow();
+  }
   // stage2: query
   if (kernel_volume % 2 != 0){
     subm_hashmap_kmap_stage2_odd_kernel<hashtable32::device_view, int32_t><<<(int)ceil((double)n_points * (kernel_volume / 2) / 256), 256>>>(
@@ -327,9 +329,11 @@ std::vector<at::Tensor> build_kernel_map_subm_hashmap(
   at::Tensor _out_in_map = torch::full({n_points_pad, kernel_volume}, -1, options);
   int *out_in_map = _out_in_map.data_ptr<int>();
   // stage1: insert to hashmap
-  if (to_insert)
+  if (to_insert) {
     subm_hashmap_kmap_stage1<hashtable::device_view, int64_t><<<(int)ceil((double)n_points / 256), 256>>>(
         table.get_device_view(), n_points, kernel_volume, in_coords, coords_min, coords_max, out_coords);
+    table.check_overflow();
+  }
   // stage2: query
   if (kernel_volume % 2 != 0){
     subm_hashmap_kmap_stage2_odd_kernel<hashtable::device_view, int64_t><<<(int)ceil((double)n_points * (kernel_volume / 2) / 256), 256>>>(
@@ -406,22 +410,21 @@ std::vector<at::Tensor> build_kernel_map_downsample_hashmap_int32(
       torch::zeros({n_out_points_scalar, NDim}, options);
   inverse_transform_coords_and_insert_kernel<<<
       (int)ceil((double)n_out_points_scalar / 256), 256>>>(
-      table.get_device_view(), n_out_points_scalar, out_coords, 
+      table.get_device_view(), n_out_points_scalar, out_coords,
       coords_min, coords_max, final_out_coords.data_ptr<int>());
-  
-  //table.insert_vals(_out_coords);
+  table.check_overflow();
 
-  // stage3: replace the (64b) coordinate ravel hashes with the output idx  
+  // stage3: replace the (64b) coordinate ravel hashes with the output idx
   int divisor = table.get_divisor();
   at::Tensor _out_in_map =
       torch::full({(n_out_points_scalar + divisor - 1) / divisor * divisor, kernel_volume}, -1, options);
   int *out_in_map = _out_in_map.data_ptr<int>();
-  
+
   downsample_hashmap_kmap_stage3<<<
       (int)ceil((double)(n_points * kernel_volume) / 256), 256>>>(
       table.get_device_view(), n_points, n_out_points_scalar, kernel_volume, out_kmap,
       out_in_map);
-  
+
   return {_out_in_map, final_out_coords};
 }
 
@@ -489,16 +492,16 @@ std::vector<at::Tensor> build_kernel_map_downsample_hashmap(
       torch::zeros({n_out_points_scalar, NDim}, options);
   inverse_transform_coords_and_insert_kernel<<<
       (int)ceil((double)n_out_points_scalar / 256), 256>>>(
-      table.get_device_view(), n_out_points_scalar, out_coords, 
+      table.get_device_view(), n_out_points_scalar, out_coords,
       coords_min, coords_max, final_out_coords.data_ptr<int>());
-  //table.insert_vals(_out_coords);
+  table.check_overflow();
 
-  // stage3: replace the (64b) coordinate ravel hashes with the output idx  
+  // stage3: replace the (64b) coordinate ravel hashes with the output idx
   int divisor = table.get_divisor();
   at::Tensor _out_in_map =
       torch::full({(n_out_points_scalar + divisor - 1) / divisor * divisor, kernel_volume}, -1, options);
   int *out_in_map = _out_in_map.data_ptr<int>();
-  
+
   downsample_hashmap_kmap_stage3<<<
       (int)ceil((double)(n_points * kernel_volume) / 256), 256>>>(
       table.get_device_view(), n_points, n_out_points_scalar, kernel_volume, out_kmap,

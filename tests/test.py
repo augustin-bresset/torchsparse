@@ -3,6 +3,8 @@ from torchsparse.nn import functional as F
 from python import (
     test_single_layer_convolution_forward,
     test_to_dense_forward,
+    test_pts_format,
+    test_pts_inference,
 )
 
 
@@ -45,6 +47,18 @@ class ToDenseTestCase(unittest.TestCase):
     def test_to_dense(self):
         max_adiff = test_to_dense_forward()
         self.assertLessEqual(max_adiff, 1e-5)
+
+
+class SparseTensorIOTestCase(unittest.TestCase):
+    def test_pts_format(self):
+        results = test_pts_format(device='cuda:0')
+        for check, ok in results.items():
+            self.assertTrue(ok, f'check échoué : {check}')
+
+    def test_pts_inference(self):
+        max_adiff = test_pts_inference(device='cuda:0')
+        self.assertEqual(max_adiff, 0.0,
+                         f'écart après round-trip : {max_adiff} (attendu 0.0)')
 
 
 if __name__ == "__main__":

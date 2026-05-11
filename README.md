@@ -77,6 +77,27 @@ pip install git+https://github.com/mit-han-lab/torchsparse.git
 ```
 without the need to clone the repository. 
 
+## Saving and Loading SparseTensors
+
+TorchSparse provides a dedicated binary format (`.pts`) for serializing `SparseTensor` objects without pickle, inspired by NumPy's `.npy` format.
+
+```python
+import torchsparse
+
+# Save
+torchsparse.save(sparse_tensor, 'pointcloud.pts')
+# or equivalently:
+sparse_tensor.save('pointcloud.pts')
+
+# Load (optionally move directly to a device)
+st = torchsparse.load('pointcloud.pts')
+st = torchsparse.load('pointcloud.pts', device='cuda:0')
+```
+
+The format stores coordinates, features, stride and spatial range as raw binary data with a self-describing JSON header. It does not use pickle and can therefore be loaded without any model class definition — only TorchSparse itself is required.
+
+See [`docs/pts_format.md`](docs/pts_format.md) for the full binary format specification.
+
 ## Benchmarks
 
 ### Inference benchmarks

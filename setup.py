@@ -37,15 +37,20 @@ if device == "cuda":
     sources.append(os.path.join("torchsparse", "backend", "torch_library.cu"))
 
 extension_type = CUDAExtension if device == "cuda" else CppExtension
+def _gencode_flags():
+    arch_list = os.getenv("TORCH_CUDA_ARCH_LIST", "").strip()
+    if not arch_list:
+        arch_list = "8.6 8.9 9.0 12.0"
+    flags = []
+    for arch in arch_list.replace(";", " ").split():
+        arch = arch.replace("+PTX", "").strip()
+        compute = arch.replace(".", "")
+        flags.append(f"-gencode=arch=compute_{compute},code=sm_{compute}")
+    return flags
+
 extra_compile_args = {
     "cxx": ["-g", "-O3", "-fopenmp", "-lgomp"],
-    "nvcc": [
-        "-O3", "-std=c++17",
-        "-gencode=arch=compute_86,code=sm_86",   # Ampere consumer (RTX 3090/3080)
-        "-gencode=arch=compute_89,code=sm_89",   # Ada Lovelace (RTX 4090 Ti / RTX 4090)
-        "-gencode=arch=compute_90,code=sm_90",   # Hopper (H100/H200)
-        "-gencode=arch=compute_120,code=sm_120", # Blackwell (B100/B200)
-    ],
+    "nvcc": ["-O3", "-std=c++17"] + _gencode_flags(),
 }
 
 setup(

@@ -103,10 +103,6 @@ class SparseTensor:
         assert self.spatial_range is not None
         return to_dense(self.feats, self.coords, self.spatial_range)
 
-    def save(self, path: str) -> None:
-        from torchsparse.io import save as _save
-        _save(self, path)
-
     def __add__(self, other):
         output = SparseTensor(
             coords=self.coords,

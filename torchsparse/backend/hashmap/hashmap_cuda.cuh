@@ -8,6 +8,7 @@
 #include <utility>
 #include "cuda_runtime.h"
 #include <torch/extension.h>
+#include <ATen/cuda/CUDAContext.h>
 
 /** Reserved value for indicating "empty". */
 #define EMPTY_CELL (0)
@@ -94,7 +95,10 @@ class GPUHashTable {
         table_keys(table_keys.data_ptr<key_type>()),
         table_vals(table_vals.data_ptr<val_type>()), _divisor(128){
     cudaMalloc((void **)&d_overflow_flag, sizeof(int));
-    cudaMemset(d_overflow_flag, 0, sizeof(int));
+    // Use the current PyTorch CUDA stream so this zeroing is ordered before
+    // insert_coords_kernel (which also runs on the current stream).
+    cudaMemsetAsync(d_overflow_flag, 0, sizeof(int),
+                    at::cuda::getCurrentCUDAStream().stream());
   };
   ~GPUHashTable() {
     if(free_pointers){
@@ -104,7 +108,10 @@ class GPUHashTable {
     cudaFree(d_overflow_flag);
   };
   void check_overflow() {
-    cudaError_t sync_err = cudaDeviceSynchronize();
+    // Sync only the current PyTorch stream (not all streams) so we don't
+    // serialise unrelated work on other streams.
+    cudaError_t sync_err =
+        cudaStreamSynchronize(at::cuda::getCurrentCUDAStream().stream());
     TORCH_CHECK(sync_err == cudaSuccess,
       "TorchSparse: CUDA error in hashmap kernel: ", cudaGetErrorString(sync_err),
       " — possible causes: hash collision chain, illegal memory access in insert/lookup.");
@@ -284,12 +291,14 @@ __global__ void lookup_coords_kernel(
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::insert_many(const key_type *keys, const int n){
-  insert_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, keys, n, _capacity, d_overflow_flag);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  insert_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream.stream()>>>(table_keys, table_vals, keys, n, _capacity, d_overflow_flag);
 }
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::insert_many_coords(int *coords, const int n){
-  insert_coords_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, coords, n, _capacity, d_overflow_flag);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  insert_coords_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream.stream()>>>(table_keys, table_vals, coords, n, _capacity, d_overflow_flag);
 }
 
 template <typename key_type, typename val_type>
@@ -307,7 +316,8 @@ void GPUHashTable<key_type, val_type>::insert_coords(at::Tensor coords){
 
 template <typename key_type, typename val_type>
 void GPUHashTable<key_type, val_type>::lookup_many(const key_type *keys, val_type *results, const int n){
-  lookup_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(table_keys, table_vals, keys, results, n, _capacity);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  lookup_kernel<key_type, val_type><<<(n + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream.stream()>>>(table_keys, table_vals, keys, results, n, _capacity);
 }
 
 template <typename key_type, typename val_type>
@@ -315,12 +325,13 @@ void GPUHashTable<key_type, val_type>::lookup_many_coords(
   int *coords, val_type *results,
   const int* kernel_sizes, const int* strides,
   const int n, const int kernel_volume){
+  auto stream = at::cuda::getCurrentCUDAStream();
   if (kernel_volume % 2)
-    lookup_coords_kernel<key_type, val_type, true><<<(n * kernel_volume + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
+    lookup_coords_kernel<key_type, val_type, true><<<(n * kernel_volume + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream.stream()>>>(
       table_keys, table_vals, coords, results, kernel_sizes, strides,
       n, _capacity, kernel_volume);
   else
-    lookup_coords_kernel<key_type, val_type, false><<<(n * kernel_volume + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
+    lookup_coords_kernel<key_type, val_type, false><<<(n * kernel_volume + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE, 0, stream.stream()>>>(
       table_keys, table_vals, coords, results, kernel_sizes, strides,
       n, _capacity, kernel_volume);
 }

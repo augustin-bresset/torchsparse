@@ -5,6 +5,8 @@ from python import (
     test_to_dense_forward,
     test_pts_format,
     test_pts_inference,
+    test_torchscript_basics,
+    test_torchscript_save_load,
 )
 
 
@@ -47,6 +49,18 @@ class ToDenseTestCase(unittest.TestCase):
     def test_to_dense(self):
         max_adiff = test_to_dense_forward()
         self.assertLessEqual(max_adiff, 1e-5)
+
+
+class TorchScriptTestCase(unittest.TestCase):
+    def test_basics(self):
+        results = test_torchscript_basics(device="cuda:0")
+        for check, ok in results.items():
+            self.assertTrue(ok, f"check échoué : {check}")
+
+    def test_save_load(self):
+        max_adiff = test_torchscript_save_load(device="cuda:0")
+        self.assertEqual(max_adiff, 0.0,
+                         f"save/load mismatch : {max_adiff}")
 
 
 class SparseTensorIOTestCase(unittest.TestCase):

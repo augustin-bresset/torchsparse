@@ -33,6 +33,9 @@ for fpath in glob.glob(os.path.join("torchsparse", "backend", "**", "*")):
     ):
         sources.append(fpath)
 
+if device == "cuda":
+    sources.append(os.path.join("torchsparse", "backend", "torch_library.cu"))
+
 extension_type = CUDAExtension if device == "cuda" else CppExtension
 extra_compile_args = {
     "cxx": ["-g", "-O3", "-fopenmp", "-lgomp"],

@@ -200,3 +200,8 @@ TorchSparse is inspired by many existing open-source libraries, including (but n
 
 We also thank [AttributeDict](https://github.com/grimen/python-attributedict/tree/master) for providing an elegant way to manage the kernel/model configurations.
 
+## Prerequisites
+Pre-requisite for augustin-bresset
+```
+sudo apt-get install libsparsehash-dev
+```

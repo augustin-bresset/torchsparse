@@ -2,6 +2,20 @@
 requires = [
     "setuptools>=40.8.0",
     "wheel",
-    "torch>=1.8.0"
+    "torch>=1.8.0",
+    "ninja"
 ]
 build-backend = "setuptools.build_meta"
+
+[tool.isort]
+known_first_party = ["torchsparse"]
+
+[tool.yapf]
+based_on_style = "google"
+spaces_around_power_operator = true
+split_before_arithmetic_operator = true
+split_before_logical_operator = true
+split_before_bitwise_operator = true
+
+[tool.pydocstyle]
+convention = "google"

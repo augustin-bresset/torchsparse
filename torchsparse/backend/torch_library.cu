@@ -123,7 +123,7 @@ std::tuple<at::Tensor, at::Tensor> scatter_conv_forward(
     //    results: [kernel_vol, N_out]
     auto results = out_in_map.t().contiguous();
     auto valid   = (results != -1);
-    auto nbsizes = valid.to(at::kInt).sum(1).to(at::kInt); // [kernel_vol] — sum widens to int64; cast back
+    auto nbsizes = valid.to(at::kInt).sum(1).to(at::kInt); // [kernel_vol] -- sum widens to int64; cast back
     auto nbmaps  = valid.nonzero().contiguous();   // [M, 2]: (k_pos, out_idx)
 
     if (nbmaps.size(0) > 0) {
@@ -139,7 +139,7 @@ std::tuple<at::Tensor, at::Tensor> scatter_conv_forward(
     nbmaps = nbmaps.to(at::kInt).contiguous();
 
     // 5. Build input/output masks
-    // nbsizes has shape [kernel_vol] — pass it whole (matches Python behaviour:
+    // nbsizes has shape [kernel_vol] -- pass it whole (matches Python behaviour:
     // nbsizes[:N_out] in Python is a no-op when kernel_vol <= N_out)
     auto masks = build_mask_from_kmap(
         N_in, N_out,
@@ -175,7 +175,7 @@ std::tuple<at::Tensor, at::Tensor> scatter_conv_forward(
 // TORCH_LIBRARY registration
 // ────────────────────────────────────────────────────────────────────────────
 TORCH_LIBRARY(torchsparse, m) {
-    // Custom class — use m.class_<T> inside TORCH_LIBRARY
+    // Custom class -- use m.class_<T> inside TORCH_LIBRARY
     m.class_<SparseTensorImpl>("SparseTensorImpl")
         .def(torch::init<at::Tensor, at::Tensor,
                          std::vector<int64_t>,

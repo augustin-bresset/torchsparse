@@ -62,7 +62,7 @@ __device__ int hash_murmur3(key_type key, int _capacity){
   k ^= k >> 13;
   k *= UINT64_C(0xc2b2ae35);
   k ^= k >> 16;
-  // unsigned modulo is always in [0, _capacity) — no negative index possible
+  // unsigned modulo is always in [0, _capacity) -- no negative index possible
   return (int)(k % (uint64_t)_capacity);
 }
 
@@ -114,11 +114,11 @@ class GPUHashTable {
         cudaStreamSynchronize(at::cuda::getCurrentCUDAStream().stream());
     TORCH_CHECK(sync_err == cudaSuccess,
       "TorchSparse: CUDA error in hashmap kernel: ", cudaGetErrorString(sync_err),
-      " — possible causes: hash collision chain, illegal memory access in insert/lookup.");
+      " -- possible causes: hash collision chain, illegal memory access in insert/lookup.");
     int flag = 0;
     cudaMemcpy(&flag, d_overflow_flag, sizeof(int), cudaMemcpyDeviceToHost);
     TORCH_CHECK(flag == 0,
-      "TorchSparse: GPU hashmap overflow — table capacity (", _capacity, " slots) exceeded. "
+      "TorchSparse: GPU hashmap overflow -- table capacity (", _capacity, " slots) exceeded. "
       "Increase torchsparse.backends.hash_rsv_ratio (current default: 2) or use a larger voxel size.");
   }
   void insert_many(const key_type *keys, const int n);
@@ -171,7 +171,7 @@ __global__ void insert_kernel(key_type* table_keys, val_type* table_vals, const 
             }
             slot = (slot + 1) % _capacity;
         }
-        // Table is full — signal overflow
+        // Table is full -- signal overflow
         if (overflow_flag) atomicOr(overflow_flag, 1);
     }
 }
@@ -368,7 +368,7 @@ __device__ void GPUHashTable<key_type, val_type>::device_view::insert(const key_
     }
     slot = (slot + 1) % _capacity;
   }
-  // Table is full — signal overflow
+  // Table is full -- signal overflow
   if (_overflow_flag) atomicOr(_overflow_flag, 1);
 }
 
@@ -389,6 +389,6 @@ __device__ val_type GPUHashTable<key_type, val_type>::device_view::lookup(const 
     }
     slot = (slot + 1) % _capacity;
   }
-  // Table fully scanned — overflow was signalled at insert time
+  // Table fully scanned -- overflow was signalled at insert time
   return EMPTY_CELL;
 }

@@ -20,8 +20,8 @@ Welcome to TorchSparse's documentation!
 
 Additional documents (in ``docs/``):
 
-* `pts_format.md <../pts_format.html>`_ — binary I/O format specification
-* `FAQ.md <../FAQ.html>`_ — frequently asked questions
+* `pts_format.md <../pts_format.html>`_ -- binary I/O format specification
+* `FAQ.md <../FAQ.html>`_ -- frequently asked questions
 
 Indices and tables
 ==================

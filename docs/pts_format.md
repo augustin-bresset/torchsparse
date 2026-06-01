@@ -1,6 +1,6 @@
 # TorchSparse `.pts` Binary Format
 
-The `.pts` format stores a `SparseTensor` as a self-describing binary file. It is inspired by NumPy's [`.npy` format](https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html): a compact fixed header followed by raw tensor data. The format does **not** use pickle, so it can be loaded without any model class definition — only TorchSparse is required.
+The `.pts` format stores a `SparseTensor` as a self-describing binary file. It is inspired by NumPy's [`.npy` format](https://numpy.org/doc/stable/reference/generated/numpy.lib.format.html): a compact fixed header followed by raw tensor data. The format does **not** use pickle, so it can be loaded without any model class definition -- only TorchSparse is required.
 
 ## File Layout
 
@@ -8,8 +8,8 @@ The `.pts` format stores a `SparseTensor` as a self-describing binary file. It i
 Offset        Size        Field
 ─────────────────────────────────────────────────────────────
 0             6           Magic bytes: \x93TSPTS
-6             1           Version major (uint8)   — currently 1
-7             1           Version minor (uint8)   — currently 0
+6             1           Version major (uint8)   -- currently 1
+7             1           Version minor (uint8)   -- currently 0
 8             4           Header length H (uint32, little-endian)
 12            H           JSON header (UTF-8, space-padded, ends with \n)
 12 + H        C           Coords data  (C-contiguous raw bytes)
@@ -42,9 +42,9 @@ Dtype descriptors follow the [NumPy array protocol](https://numpy.org/doc/stable
 
 Both tensors are stored in **C-contiguous order** (row-major) with no padding between them.
 
-- **Coords** — integer tensor of shape `[N, D]`, typically `int32`.  
+- **Coords** -- integer tensor of shape `[N, D]`, typically `int32`.  
   For 3D point clouds with a batch dimension: `D = 4` (`[batch, x, y, z]`).
-- **Feats** — floating-point tensor of shape `[N, C]`.
+- **Feats** -- floating-point tensor of shape `[N, C]`.
 
 The byte length of each section can be computed from the header:
 

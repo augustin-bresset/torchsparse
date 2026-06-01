@@ -94,7 +94,7 @@ st = torchsparse.load('pointcloud.pts')
 st = torchsparse.load('pointcloud.pts', device='cuda:0')
 ```
 
-The format stores coordinates, features, stride and spatial range as raw binary data with a self-describing JSON header. It does not use pickle and can therefore be loaded without any model class definition — only TorchSparse itself is required.
+The format stores coordinates, features, stride and spatial range as raw binary data with a self-describing JSON header. It does not use pickle and can therefore be loaded without any model class definition -- only TorchSparse itself is required.
 
 See [`docs/pts_format.md`](docs/pts_format.md) for the full binary format specification.
 

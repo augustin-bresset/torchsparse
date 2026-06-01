@@ -19,7 +19,7 @@ SparseTensor
 
 ----
 
-torchsparse.nn — Layers
+torchsparse.nn -- Layers
 -----------------------
 
 Convolution
@@ -73,7 +73,7 @@ torchsparse.nn.functional
 
 ----
 
-torchsparse.script — TorchScript export
+torchsparse.script -- TorchScript export
 ----------------------------------------
 
 Use these when you need to export a sparse model with
@@ -116,7 +116,7 @@ Example
 
 ----
 
-torchsparse.io — Binary I/O
+torchsparse.io -- Binary I/O
 ----------------------------
 
 Save and load :class:`~torchsparse.SparseTensor` objects in the compact
@@ -146,7 +146,7 @@ Example
 
 ----
 
-torchsparse.backends — Runtime options
+torchsparse.backends -- Runtime options
 ----------------------------------------
 
 Global runtime flags that control precision and performance.

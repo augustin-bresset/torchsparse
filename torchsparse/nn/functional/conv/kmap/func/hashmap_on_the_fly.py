@@ -22,6 +22,10 @@ def build_kmap_implicit_GEMM_hashmap_on_the_fly(
 ) -> Dict:
     kmap["coords"] = _coords
     kmap["spatial_range"] = spatial_range
+    if _coords.shape[0] == 0:
+        kmap["out_in_map"] = torch.zeros((0, 0), dtype=torch.int32, device=_coords.device)
+        kmap["sizes"] = (input_node_num, 0)
+        return kmap
     # coords = _coords[:, [3, 0, 1, 2]]
     coords = _coords.contiguous()
     if spatial_range is not None:

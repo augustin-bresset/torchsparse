@@ -205,3 +205,11 @@ Pre-requisite for augustin-bresset
 ```
 sudo apt-get install libsparsehash-dev
 ```
+
+## Local development install (from source)
+
+```bash
+pip install --no-build-isolation -e .
+```
+
+`--no-build-isolation` is required because `pyproject.toml` lists `torch` as a build dependency — without it, pip spins up an isolated environment that lacks the system CUDA-enabled torch and the C++ extension compilation fails.

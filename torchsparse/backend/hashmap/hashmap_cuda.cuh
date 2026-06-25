@@ -52,14 +52,15 @@ __device__ int hash(key_type key, int _capacity){
 
 template <typename key_type>
 __device__ int hash_murmur3(key_type key, int _capacity){
-  // use the murmur3 hash function for int32
-  int64_t k = (int64_t)key;
+  // Murmur3 finalizer in unsigned arithmetic: the multiplies overflow, and
+  // signed overflow is undefined behavior the optimizer may exploit.
+  uint64_t k = (uint64_t)(int64_t)key;
   k ^= k >> 16;
-  k *= 0x85ebca6b;
+  k *= UINT64_C(0x85ebca6b);
   k ^= k >> 13;
-  k *= 0xc2b2ae35;
+  k *= UINT64_C(0xc2b2ae35);
   k ^= k >> 16;
-  return k % _capacity;
+  return (int)(k % (uint64_t)_capacity);
 }
 
 template <typename key_type, typename val_type>

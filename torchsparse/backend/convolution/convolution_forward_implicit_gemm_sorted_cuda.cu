@@ -1776,6 +1776,10 @@ at::Tensor conv_forward_implicit_gemm_sorted_cuda(
     _out_feats = torch::empty({split_mask_num, num_out_feats, num_out_channels}, options);
   else
     _out_feats = torch::empty({num_out_feats, num_out_channels}, options);
+
+  // Empty output: skip 0-block launch (cudaErrorInvalidValue); out_feats empty.
+  if (num_out_feats == 0) return _out_feats;
+
   auto reduced_mask = _reduced_mask.data_ptr<int>();
   auto out_in_map = _out_in_map.data_ptr<int>();
   auto reorder_loc = _reorder_loc.data_ptr<int>();

@@ -1540,6 +1540,9 @@ at::Tensor conv_forward_implicit_gemm_cuda(
       torch::TensorOptions().dtype(_in_feats.dtype()).device(_in_feats.device());
   at::Tensor _out_feats = torch::empty({num_out_feats, num_out_channels}, options);
 
+  // Empty output: skip 0-block launch (cudaErrorInvalidValue); out_feats empty.
+  if (num_out_feats == 0) return _out_feats;
+
   auto out_in_map = _out_in_map.data_ptr<int>();
   bool is_half = _in_feats.scalar_type() == at::ScalarType::Half;
 

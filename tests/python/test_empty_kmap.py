@@ -28,6 +28,7 @@ from torchsparse import nn as spnn
 __all__ = [
     "test_empty_backend_launchers",
     "test_empty_conv3d_forward",
+    "test_downsample_collapse_no_crash",
     "test_hashmap_large_coords",
 ]
 
@@ -106,6 +107,27 @@ def test_empty_conv3d_forward(device="cuda:0"):
     return results
 
 
+def test_downsample_collapse_no_crash(device="cuda:0"):
+    """A strided conv whose output collapses to 0 voxels must not crash. A
+    single voxel at the origin with an even kernel downsamples to a negative
+    anchor -> 0 output voxels (n_out_points_scalar == 0) in the on-the-fly
+    downsample builder, which would launch a 0-block grid in
+    inverse_transform_coords_and_insert_kernel -> cudaErrorInvalidValue. The
+    backend guard returns an empty kernel map instead."""
+    results = {}
+    coords = torch.tensor([[0, 0, 0, 0]], dtype=torch.int32, device=device)
+    feats = torch.randn(1, 4, device=device)
+    x = SparseTensor(coords=coords, feats=feats)
+
+    conv = spnn.Conv3d(4, 8, kernel_size=2, stride=2).to(device)
+    y = conv(x)
+    torch.cuda.synchronize()
+
+    results["output_empty"] = y.feats.shape[0] == 0
+    results["cuda_context_alive"] = _cuda_context_alive(device)
+    return results
+
+
 def test_hashmap_large_coords(device="cuda:0"):
     """Regression for the murmur3 signed-overflow hashmap crash (a6ba56a):
     large coordinates must not produce negative table indices / illegal access.
@@ -136,6 +158,7 @@ if __name__ == "__main__":
     for fn in (
         test_empty_backend_launchers,
         test_empty_conv3d_forward,
+        test_downsample_collapse_no_crash,
         test_hashmap_large_coords,
     ):
         res = fn(device=dev)

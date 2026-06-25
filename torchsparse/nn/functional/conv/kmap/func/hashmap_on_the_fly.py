@@ -53,8 +53,14 @@ def build_kmap_implicit_GEMM_hashmap_on_the_fly(
     assert (
         torchsparse.backends.hash_rsv_ratio >= 2
     ), f"hash_rsv_ratio should be no less than 2, now {torchsparse.backends.hash_rsv_ratio}."
+    # The subm path inserts the input coords (count == input), but the
+    # downsample path inserts the OUTPUT coords, whose count grows up to
+    # input * kernel_volume for scattered clouds (spconv downsample expands,
+    # e.g. ~3x at stride 2). Sizing on input alone overflows the table -> a
+    # silent illegal memory access upstream, a clean check_overflow() error here.
+    expansion = 1 if subm else int(torch.prod(kernel_size))
     hashmap_capacity = max(
-        512, int(torchsparse.backends.hash_rsv_ratio * _coords.shape[0])
+        512, int(torchsparse.backends.hash_rsv_ratio * _coords.shape[0] * expansion)
     )
     if kmap["hashmap_keys"] is None:
         kmap["hashmap_keys"] = torch.zeros(

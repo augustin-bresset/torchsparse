@@ -401,6 +401,13 @@ std::vector<at::Tensor> build_kernel_map_downsample_hashmap_int32(
   int32_t *out_coords = _out_coords.data_ptr<int>();
   // stage 2.1: insert to the hashmap and transform the out coords to N x 4 format.
   int n_out_points_scalar = _out_coords.size(0);
+  // Empty output (downsample collapsed every voxel, e.g. a 1-voxel cloud with
+  // an even kernel at the origin): the insert / stage3 kernels below would
+  // launch a 0-block grid -> cudaErrorInvalidValue, poisoning the CUDA context.
+  // Return the already-empty maps without launching.
+  if (n_out_points_scalar == 0)
+    return {torch::full({0, kernel_volume}, -1, options),
+            torch::zeros({0, NDim}, options)};
   // Check the _capacity of hashtable
   int capacity = table.get_capacity();
   if (capacity < n_out_points_scalar)
@@ -483,6 +490,13 @@ std::vector<at::Tensor> build_kernel_map_downsample_hashmap(
 
   // stage 2.1: insert to the hashmap and transform the out coords to N x 4 format.
   int n_out_points_scalar = _out_coords.size(0);
+  // Empty output (downsample collapsed every voxel, e.g. a 1-voxel cloud with
+  // an even kernel at the origin): the insert / stage3 kernels below would
+  // launch a 0-block grid -> cudaErrorInvalidValue, poisoning the CUDA context.
+  // Return the already-empty maps without launching.
+  if (n_out_points_scalar == 0)
+    return {torch::full({0, kernel_volume}, -1, options),
+            torch::zeros({0, NDim}, options)};
   // Check the _capacity of hashtable
   int capacity = table.get_capacity();
   if (capacity < n_out_points_scalar)

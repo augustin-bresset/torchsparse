@@ -52,14 +52,18 @@ __device__ int hash(key_type key, int _capacity){
 
 template <typename key_type>
 __device__ int hash_murmur3(key_type key, int _capacity){
-  // use the murmur3 hash function for int32
-  int64_t k = (int64_t)key;
+  // Murmur3 finalizer using unsigned arithmetic to avoid signed-overflow UB.
+  // The multiplies overflow int64; signed overflow is UB in CUDA and NVCC may
+  // optimize away a post-hoc negativity check, leaving `k % _capacity` negative
+  // -> negative table index -> illegal memory access. Unsigned wraps defined.
+  uint64_t k = (uint64_t)(int64_t)key;
   k ^= k >> 16;
-  k *= 0x85ebca6b;
+  k *= UINT64_C(0x85ebca6b);
   k ^= k >> 13;
-  k *= 0xc2b2ae35;
+  k *= UINT64_C(0xc2b2ae35);
   k ^= k >> 16;
-  return k % _capacity;
+  // unsigned modulo is always in [0, _capacity) -- no negative index possible
+  return (int)(k % (uint64_t)_capacity);
 }
 
 template <typename key_type, typename val_type>

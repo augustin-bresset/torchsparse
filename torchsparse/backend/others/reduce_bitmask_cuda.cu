@@ -71,6 +71,9 @@ torch::Tensor reduce_bitmask_cuda(
     auto options = torch::TensorOptions().dtype(torch::kInt32).device(_bitmask_int.device());
     torch::Tensor _reduced_bitmask_int = torch::zeros({split_mask_num, reduced_row_num}, options);
 
+    // Empty map: nothing to reduce; reduced bitmask stays zero.
+    if (output_node_num == 0) return _reduced_bitmask_int;
+
     auto bitmask_int = _bitmask_int.data_ptr<int>();
     auto reduced_bitmask_int = _reduced_bitmask_int.data_ptr<int>();
 

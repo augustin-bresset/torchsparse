@@ -36,6 +36,8 @@ at::Tensor reorder_out_in_map_cuda(
       torch::TensorOptions().dtype(_out_in_map.dtype()).device(_out_in_map.device());
     at::Tensor _reorder_out_in_map = torch::empty({M, kernel_volume}, options);
 
+    // Empty map: skip 0-block launch (cudaErrorInvalidValue); result is empty.
+    if (M == 0) return _reorder_out_in_map;
 
     auto out_in_map = _out_in_map.data_ptr<int>();
     auto reorder_loc = _reorder_loc.data_ptr<int>();

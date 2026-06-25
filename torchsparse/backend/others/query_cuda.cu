@@ -49,6 +49,9 @@ at::Tensor hash_query_cuda(const at::Tensor hash_query,
 
 void convert_transposed_out_in_map(const at::Tensor out_in_map,
                             at::Tensor out_in_map_t) {
+  // Empty map: skip 0-block launch (cudaErrorInvalidValue). out_in_map_t is
+  // already -1-filled by the caller, i.e. the transpose of an empty map.
+  if (out_in_map.size(0) == 0) return;
   convert_out_in_map_kernel<<<(out_in_map.size(0) * out_in_map.size(1) + 255) / 256, 256>>>(
     out_in_map.data_ptr<int>(), out_in_map_t.data_ptr<int>(), out_in_map.size(0), out_in_map.size(1));
 }
@@ -59,6 +62,8 @@ void convert_transposed_out_in_map(const at::Tensor out_in_map,
 at::Tensor derive_bitmask_from_out_in_map(const at::Tensor out_in_map, const int split_mask_num, int valid_n) {
   at::Tensor bitmask = torch::full(
       {split_mask_num, out_in_map.size(0)}, -1, at::device(out_in_map.device()).dtype(at::ScalarType::Int));
+  // Empty map: skip 0-block launch (cudaErrorInvalidValue); bitmask is empty.
+  if (out_in_map.size(0) == 0) return bitmask;
   derive_bit_mask_from_out_in_map_kernel<<<(split_mask_num * out_in_map.size(0) + 255) / 256, 256>>>(
     out_in_map.data_ptr<int>(), bitmask.data_ptr<int>(), valid_n, out_in_map.size(0), out_in_map.size(1), split_mask_num);
   return bitmask;

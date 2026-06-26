@@ -48,6 +48,14 @@ def build_kmap_implicit_GEMM_hashmap_on_the_fly(
     else:
         coords_min = make_tensor((0, 0, 0, 0), dtype=torch.int, device=coords.device)
 
+    # Even-kernel downsampling (ks=2) shrinks each axis' extent by (ks-1) before
+    # // stride, so for a thin/planar input (a LiDAR ground plane, a wall) an
+    # axis' coords_max drops below coords_min: the valid output range becomes
+    # empty and the whole frame collapses to 0 voxels. Clamp so a thin layer
+    # maps to a single output layer instead of vanishing. No-op for normal
+    # inputs (coords_max >= coords_min already).
+    coords_max = torch.maximum(coords_max, coords_min)
+
     if subm:
         func = torchsparse.backend.build_kernel_map_subm_hashmap
     else:

@@ -28,7 +28,7 @@ from torchsparse import nn as spnn
 __all__ = [
     "test_empty_backend_launchers",
     "test_empty_conv3d_forward",
-    "test_downsample_collapse_no_crash",
+    "test_thin_input_preserved",
     "test_hashmap_large_coords",
 ]
 
@@ -107,23 +107,43 @@ def test_empty_conv3d_forward(device="cuda:0"):
     return results
 
 
-def test_downsample_collapse_no_crash(device="cuda:0"):
-    """A strided conv whose output collapses to 0 voxels must not crash. A
-    single voxel at the origin with an even kernel downsamples to a negative
-    anchor -> 0 output voxels (n_out_points_scalar == 0) in the on-the-fly
-    downsample builder, which would launch a 0-block grid in
-    inverse_transform_coords_and_insert_kernel -> cudaErrorInvalidValue. The
-    backend guard returns an empty kernel map instead."""
+def test_thin_input_preserved(device="cuda:0"):
+    """Thin / planar inputs (a single voxel, a flat ground plane) must survive
+    even-kernel (ks=2) stride-2 downsampling instead of collapsing to 0 voxels.
+
+    ks=2 shrinks each axis' extent by (ks-1) before // stride, so a thin axis'
+    coords_max dropped below coords_min and the frame collapsed to empty -- then
+    the on-the-fly kmap builder launched a 0-block grid (cudaErrorInvalidValue),
+    and even when guarded the whole scan returned empty (data loss). The
+    coords_max>=coords_min clamp preserves a thin layer; this is common in real
+    LiDAR (ground/walls) so it must not vanish."""
     results = {}
-    coords = torch.tensor([[0, 0, 0, 0]], dtype=torch.int32, device=device)
-    feats = torch.randn(1, 4, device=device)
-    x = SparseTensor(coords=coords, feats=feats)
 
-    conv = spnn.Conv3d(4, 8, kernel_size=2, stride=2).to(device)
-    y = conv(x)
+    # single voxel: used to collapse to 0, now preserved
+    x1 = SparseTensor(
+        coords=torch.tensor([[0, 0, 0, 0]], dtype=torch.int32, device=device),
+        feats=torch.randn(1, 4, device=device),
+    )
+    y1 = spnn.Conv3d(4, 8, kernel_size=2, stride=2).to(device)(x1)
     torch.cuda.synchronize()
+    results["single_voxel_preserved"] = y1.feats.shape[0] > 0
 
-    results["output_empty"] = y.feats.shape[0] == 0
+    # flat ground plane (z constant) through 4 stride-2 downsamples (stride 16)
+    g = torch.Generator().manual_seed(0)
+    n = 3000
+    xy = torch.randint(0, 150, (n, 2), generator=g)
+    coords = torch.cat(
+        [torch.zeros(n, 1, dtype=torch.int64), xy, torch.zeros(n, 1, dtype=torch.int64)],
+        dim=1,
+    ).int().to(device)
+    x2 = SparseTensor(coords=coords, feats=torch.randn(n, 4, device=device))
+    enc = torch.nn.Sequential(
+        *[spnn.Conv3d(c0, c1, kernel_size=2, stride=2)
+          for c0, c1 in [(4, 8), (8, 8), (8, 8), (8, 8)]]
+    ).to(device)
+    y2 = enc(x2)
+    torch.cuda.synchronize()
+    results["ground_plane_not_collapsed"] = y2.feats.shape[0] > 0
     results["cuda_context_alive"] = _cuda_context_alive(device)
     return results
 
@@ -158,7 +178,7 @@ if __name__ == "__main__":
     for fn in (
         test_empty_backend_launchers,
         test_empty_conv3d_forward,
-        test_downsample_collapse_no_crash,
+        test_thin_input_preserved,
         test_hashmap_large_coords,
     ):
         res = fn(device=dev)

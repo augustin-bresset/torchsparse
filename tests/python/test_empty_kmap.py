@@ -226,6 +226,25 @@ def test_empty_kmap_backward(device="cuda:0"):
     results["collapsed_wgrad_finite"] = all(
         bool(torch.isfinite(t).all().item()) for t in grads)
     results["context_alive_after_collapse"] = _cuda_context_alive(device)
+
+    # 3. The OTHER degenerate map, which cases 1-2 do NOT reach and which the Python
+    #    short-circuit now hides: out_in_map with 0 ROWS but a full K columns (no
+    #    active pairs, kernel volume intact). Cases 1-2 give K = 0, so the grid is
+    #    empty and nothing is dereferenced; here kernel_volume is 27, the grid is
+    #    sized from num_in_channels * kernel_volume and stays FULL, and the kernel
+    #    walks 0-row buffers -- the illegal-memory-access variant. It has to be
+    #    driven through the backend directly, since no nn-level path reaches it now.
+    ic, oc, K, split_k = 16, 32, 27, 32
+    grad_output = torch.zeros((0, oc), device=device)          # no output points
+    in_feats = torch.randn(64, ic, device=device)              # input points DO exist
+    out_in_map = torch.zeros((0, K), dtype=torch.int32, device=device)
+    wgrad = torchsparse.backend.conv_backward_wgrad_implicit_gemm_cuda(
+        grad_output, in_feats, out_in_map, split_k,
+        torchsparse.backends.allow_tf32, torchsparse.backends.allow_fp16)
+    torch.cuda.synchronize()
+    results["zero_row_map_shape"] = tuple(wgrad.shape) == (split_k, oc * K, ic)
+    results["zero_row_map_is_zero"] = bool((wgrad == 0).all().item())
+    results["context_alive_after_zero_row"] = _cuda_context_alive(device)
     return results
 
 

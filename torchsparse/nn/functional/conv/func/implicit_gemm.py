@@ -126,6 +126,19 @@ class ImplicitGEMMConvolutionFuntion(Function):  # TorchSparse++
 
         kernel_volume, ic, oc = weight.size()
 
+        # Degenerate kernel map: a fully-downsampled bottleneck (or an empty input)
+        # leaves no active input/output pairs, so both gradients are exactly zero.
+        # This must be short-circuited HERE rather than in the backend, because the
+        # wgrad kernel sizes its output from out_in_map.size(1) -- which is 0 in this
+        # case -- and the caller below reshapes that result to the weight's TRUE
+        # (kernel_volume, ic, oc). A 0-element tensor cannot take that shape, so the
+        # pass dies with "shape '[27, 32, 16]' is invalid for input of size 0". Only
+        # Python knows the true kernel_volume (it comes from the weight), so no
+        # backend-side guard can produce a correctly shaped result.
+        if input.numel() == 0 or grad_output.numel() == 0 or out_in_map_bwd.numel() == 0:
+            return (torch.zeros_like(input), torch.zeros_like(weight),
+                    None, None, None)
+
         if grad_output.device.type == "cuda":
             if kernel_volume < 32:  # sort mode
                 # dgrad

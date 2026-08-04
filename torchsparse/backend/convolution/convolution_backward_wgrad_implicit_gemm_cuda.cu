@@ -1622,6 +1622,21 @@ at::Tensor conv_backward_wgrad_implicit_gemm_cuda(
   int kernel_volume = _out_in_map.size(1);
   auto options =
       torch::TensorOptions().dtype(_in_feats.dtype()).device(_in_feats.device());
+  // Degenerate kernel map: the sum this gradient accumulates runs over an empty index
+  // set, so the weight gradient is exactly zero. It must be short-circuited here rather
+  // than left to the kernel: every grid below is sized from num_in_channels and
+  // kernel_volume, NEVER from the active-point count, so the launch stays non-empty and
+  // the kernel indexes into 0-row in_feats/out_in_map buffers. That is an out-of-bounds
+  // read, reported asynchronously as "illegal memory access" at whatever unrelated CUDA
+  // call happens to synchronise next. This is the mirror of the forward guard in
+  // convolution_forward_implicit_gemm_cuda.cu, whose failure mode is the opposite (a
+  // 0-block launch -> cudaErrorInvalidValue), which is why that guard does not cover it.
+  // zeros, not empty: this tensor is a gradient of fixed shape and uninitialised memory
+  // would be handed straight to the optimiser.
+  if (num_in_feats == 0 || _out_in_map.size(0) == 0 || _kernel.size(0) == 0 ||
+      kernel_volume == 0) {
+    return torch::zeros({split_k_iters, num_in_channels * kernel_volume, _kernel.size(1)}, options);
+  }
   at::Tensor _out_feats = torch::empty({split_k_iters, num_in_channels * kernel_volume, _kernel.size(1)}, options);
   int num_out_feats = _out_feats.size(1);
   int num_out_channels = _out_feats.size(2);

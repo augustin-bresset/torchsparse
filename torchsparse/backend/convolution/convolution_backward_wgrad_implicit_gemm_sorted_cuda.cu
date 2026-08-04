@@ -1752,6 +1752,17 @@ at::Tensor conv_backward_wgrad_implicit_gemm_sorted_cuda(
   int num_in_channels = _in_feats.size(1);
   int kernel_volume = _out_in_map.size(1);
   int split_mask_num = _reorder_loc.size(0);
+  // Same degenerate case as the unsorted variant, guarded BEFORE split_mask_len because
+  // that line divides by split_mask_num: an empty _reorder_loc makes it an integer
+  // division by zero, which faults before any kernel is even launched. See the comment
+  // in convolution_backward_wgrad_implicit_gemm_cuda.cu for why the grid geometry makes
+  // the empty map an out-of-bounds read rather than an empty launch.
+  if (num_in_feats == 0 || _out_in_map.size(0) == 0 || _kernel.size(0) == 0 ||
+      kernel_volume == 0 || split_mask_num == 0) {
+    return torch::zeros(
+        {split_k_iters, num_in_channels * kernel_volume, _kernel.size(1)},
+        torch::TensorOptions().dtype(_in_feats.dtype()).device(_in_feats.device()));
+  }
   int split_mask_len = (kernel_volume + split_mask_num - 1) / split_mask_num;
   int reduced_mask_len = _reduced_mask.size(1);
   int reorder_loc_len = _reorder_loc.size(1);  

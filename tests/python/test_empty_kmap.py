@@ -172,6 +172,63 @@ def test_hashmap_large_coords(device="cuda:0"):
     return results
 
 
+def test_empty_kmap_backward(device="cuda:0"):
+    """The BACKWARD half of the empty-kernel-map guard, which 61b77b6b left open.
+
+    Until this test existed the whole file exercised forward only, and the forward
+    guard cannot stand in for the backward one: their failure modes are opposite.
+    Forward sizes its grid from the active-feature count, so an empty map means a
+    0-block launch (cudaErrorInvalidValue). conv_backward_wgrad_implicit_gemm sizes
+    its grid from num_in_channels * kernel_volume * j_factors1 * split_k_iters --
+    never from the point count -- so the grid stays FULL and the kernel reads 0-row
+    in_feats/out_in_map buffers: an out-of-bounds access surfacing asynchronously as
+    "illegal memory access", typically at some later unrelated CUDA call.
+
+    The gradient is also checked to be exactly zero, not merely finite: the guard
+    returns torch::zeros where the surrounding code allocates torch::empty, and an
+    uninitialised weight gradient would be silently consumed by the optimiser --
+    a wrong-results bug strictly worse than the crash it replaces."""
+    results = {}
+
+    # 1. empty input, straight through a strided conv
+    conv = spnn.Conv3d(16, 32, kernel_size=3, stride=2).to(device)
+    x = SparseTensor(
+        coords=torch.zeros((0, 4), dtype=torch.int32, device=device),
+        feats=torch.zeros((0, 16), device=device, requires_grad=True),
+    )
+    conv(x).feats.sum().backward()
+    torch.cuda.synchronize()
+    wgrad = conv.kernel.grad
+    results["empty_backward_ran"] = wgrad is not None
+    results["empty_wgrad_finite"] = bool(torch.isfinite(wgrad).all().item())
+    results["empty_wgrad_is_zero"] = bool((wgrad == 0).all().item())
+    results["context_alive_after_empty"] = _cuda_context_alive(device)
+
+    # 2. the real shape of the failure: a sparse cloud collapsing at the bottleneck
+    #    of a stride-2 chain, with grad flowing back through the empty stage.
+    g = torch.Generator().manual_seed(0)
+    n = 512
+    coords = torch.cat(
+        [torch.zeros((n, 1), dtype=torch.int32),
+         torch.randint(0, 8, (n, 3), generator=g, dtype=torch.int32)], dim=1
+    ).to(device)
+    y = SparseTensor(coords=coords,
+                     feats=torch.randn(n, 16, generator=g).to(device).requires_grad_())
+    net = torch.nn.Sequential(*[spnn.Conv3d(16, 16, kernel_size=3, stride=2)
+                                for _ in range(5)]).to(device)
+    out = net(y).feats
+    # an empty bottleneck yields an empty output; .sum() of that is 0 and still
+    # backpropagates, which is exactly the path that used to fault.
+    out.sum().backward()
+    torch.cuda.synchronize()
+    grads = [m.kernel.grad for m in net if m.kernel.grad is not None]
+    results["collapsed_backward_ran"] = len(grads) > 0
+    results["collapsed_wgrad_finite"] = all(
+        bool(torch.isfinite(t).all().item()) for t in grads)
+    results["context_alive_after_collapse"] = _cuda_context_alive(device)
+    return results
+
+
 if __name__ == "__main__":
     dev = "cuda:0"
     all_ok = True
@@ -180,6 +237,7 @@ if __name__ == "__main__":
         test_empty_conv3d_forward,
         test_thin_input_preserved,
         test_hashmap_large_coords,
+        test_empty_kmap_backward,
     ):
         res = fn(device=dev)
         ok = all(res.values())

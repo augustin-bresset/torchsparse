@@ -117,10 +117,18 @@ __global__ void downsample_hashmap_kmap_stage3(type_hashtable_device_view table,
   int idx = tidx / kernel_volume;
   int kernel_idx = tidx % kernel_volume;
   if (idx >= n_points) return;
-  int opt_coords = in_out_in_map[tidx];
+  // type_int, NOT int: the ravel hash is 64-bit when the (batch, x, y, z)
+  // grid extent product exceeds 2^31 (an un-cropped outdoor LiDAR frame gets
+  // there easily). Truncating it made the lookup key differ from the key
+  // inserted by inverse_transform_coords_and_insert_kernel, so the lookup
+  // missed, returned EMPTY_CELL (0), and oidx = -1 indexed out_in_map out of
+  // bounds -- a sporadic cudaErrorIllegalAddress under real training loads.
+  type_int opt_coords = in_out_in_map[tidx];
   if(opt_coords >= 0){
     int oidx = table.lookup(opt_coords + 1) - 1;
-    //if(oidx < 0 || oidx >= n_points_out) printf("%d %d\n", opt_coords, oidx);
+    // A miss must never become a write at row -1; skip it (that map entry
+    // simply has no output node -- same meaning as the -1 fill value).
+    if (oidx < 0 || oidx >= n_points_out) return;
     out_in_map[oidx * kernel_volume + kernel_volume - 1 - kernel_idx] = idx;
   }
 }
